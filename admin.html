@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#090b0d">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Admin — Buildedlabs</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/admin.css">
+    <script src="/admin.js" defer></script>
+  </head>
+  <body>
+    <main class="admin-page">
+      <section class="login-panel" id="login-panel" aria-labelledby="login-title" hidden>
+        <a class="admin-brand" href="/" aria-label="Buildedlabs home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>builded<span>labs</span><sup>®</sup></span></a>
+        <p class="eyebrow">PRIVATE WORKSPACE / OWNER ACCESS</p>
+        <h1 id="login-title">Good to have<br><span>you back.</span></h1>
+        <p class="login-intro">Sign in to review project applications and reply to companies.</p>
+        <form id="login-form">
+          <label class="admin-field"><span>Username</span><input name="username" autocomplete="username" required autofocus></label>
+          <label class="admin-field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+          <p class="admin-error" id="login-error" role="alert" hidden></p>
+          <button class="admin-button admin-button-primary" type="submit">Sign in <span aria-hidden="true">↗</span></button>
+        </form>
+        <a class="back-home" href="/">← Back to the studio</a>
+      </section>
+
+      <section class="dashboard" id="dashboard" hidden>
+        <header class="admin-header">
+          <a class="admin-brand" href="/" aria-label="Buildedlabs home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>builded<span>labs</span><sup>®</sup></span></a>
+          <div class="admin-header-right"><span class="secure-label"><i></i> PRIVATE WORKSPACE</span><button class="logout-button" id="logout-button" type="button">Sign out <span aria-hidden="true">↗</span></button></div>
+        </header>
+        <div class="admin-layout">
+          <aside class="admin-sidebar">
+            <p class="eyebrow">WORKSPACE</p>
+            <button class="sidebar-link is-active" data-view="applications" type="button"><span class="sidebar-icon">▤</span> Applications <span class="sidebar-count" id="sidebar-app-count">0</span></button>
+            <button class="sidebar-link" data-view="messages" type="button"><span class="sidebar-icon">✉</span> Contact messages <span class="sidebar-count" id="sidebar-message-count">0</span></button>
+            <div class="sidebar-note"><span class="status-dot"></span><span>Project data is stored in your MongoDB database.</span></div>
+          </aside>
+
+          <div class="admin-main">
+            <section class="workspace-view" id="applications-view">
+              <div class="workspace-heading">
+                <div><p class="eyebrow">YOUR PIPELINE / 01</p><h1>Applications<span class="heading-dot">.</span></h1><p>Every good project starts somewhere.</p></div>
+                <a class="admin-button admin-button-quiet" href="/api/admin/applications/export.csv" id="export-link">Export CSV <span aria-hidden="true">↓</span></a>
+              </div>
+              <div class="stat-grid">
+                <article class="stat-card"><span>NEW TO REVIEW</span><strong id="stat-new">—</strong><small>Waiting for your first look</small></article>
+                <article class="stat-card"><span>THIS WEEK</span><strong id="stat-week">—</strong><small>Applications received</small></article>
+                <article class="stat-card"><span>ALL APPLICATIONS</span><strong id="stat-total">—</strong><small>Across every project stage</small></article>
+              </div>
+              <div class="inbox-layout">
+                <section class="inbox-list-panel" aria-label="Project application inbox">
+                  <div class="inbox-toolbar">
+                    <label class="search-field"><span class="sr-only">Search applications</span><span aria-hidden="true">⌕</span><input id="application-search" type="search" placeholder="Search company, name or email"></label>
+                    <select id="status-filter" aria-label="Filter by status"><option value="">All statuses</option><option>New</option><option>Reviewing</option><option>Call Scheduled</option><option>Proposal Sent</option><option>Won</option><option>Rejected</option><option>On Hold</option></select>
+                    <select id="service-filter" aria-label="Filter by service"><option value="">All services</option><option>Website</option><option>Database</option><option>API</option><option>Authentication</option><option>3D experience</option><option>Admin panel</option></select>
+                  </div>
+                  <div class="application-list" id="application-list" aria-live="polite"></div>
+                  <div class="list-footer"><span id="list-count">Loading applications…</span><button type="button" id="load-more" hidden>Load more ↓</button></div>
+                </section>
+
+                <section class="application-detail" id="application-detail" aria-live="polite">
+                  <div class="empty-detail"><span class="empty-detail-mark">↖</span><h2>Choose an application.</h2><p>Project details, notes and your reply tools will appear here.</p></div>
+                </section>
+              </div>
+              <p class="dashboard-error" id="dashboard-error" role="alert" hidden></p>
+            </section>
+
+            <section class="workspace-view messages-view" id="messages-view" hidden>
+              <div class="workspace-heading">
+                <div><p class="eyebrow">YOUR INBOX / 02</p><h1>Contact messages<span class="heading-dot">.</span></h1><p>Notes from the quick contact form on your website.</p></div>
+              </div>
+              <div class="message-list" id="message-list" aria-live="polite"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+      <div class="toast" id="toast" role="status" hidden></div>
+    </main>
+  </body>
+</html>
