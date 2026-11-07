@@ -14,6 +14,9 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "snehasishxofficial@gmail.com";
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const MAX_ATTACHMENT_SIZE = 4 * 1024 * 1024;
+const ADMIN_SESSIONS_COLLECTION = "adminSessions";
+const RATE_LIMITS_COLLECTION = "rateLimits";
 const applicationStatuses = [
   "New",
   "Reviewing",
@@ -40,13 +43,14 @@ const allowedAttachmentTypes = new Map([
   [".jpeg", new Set(["image/jpeg"])],
   [".webp", new Set(["image/webp"])]
 ]);
-const sessions = new Map();
 const scrypt = promisify(crypto.scrypt);
 let mongoClient;
 let db;
+let databaseConnection;
 let mailTransport;
 
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -67,7 +71,118 @@ app.use(helmet({
 app.use(express.json({ limit: "64kb" }));
 app.use(express.urlencoded({ extended: false, limit: "64kb" }));
 
+async function connectToDatabase() {
+  if (db) return db;
+  if (!process.env.MONGODB_URI) throw new Error("MONGODB_URI is required.");
+  if (!databaseConnection) {
+    const client = new MongoClient(process.env.MONGODB_URI);
+    mongoClient = client;
+    databaseConnection = (async () => {
+      try {
+        await client.connect();
+        const connectedDb = client.db(process.env.MONGODB_DB || "buildedlabs");
+        await Promise.all([
+          connectedDb.collection("applications").createIndex({ createdAt: -1 }),
+          connectedDb.collection("applications").createIndex({ status: 1, createdAt: -1 }),
+          connectedDb.collection("messages").createIndex({ createdAt: -1 }),
+          connectedDb.collection(ADMIN_SESSIONS_COLLECTION).createIndex(
+            { expiresAt: 1 },
+            { expireAfterSeconds: 0 }
+          ),
+          connectedDb.collection(RATE_LIMITS_COLLECTION).createIndex(
+            { resetAt: 1 },
+            { expireAfterSeconds: 0 }
+          )
+        ]);
+        db = connectedDb;
+        return connectedDb;
+      } catch (error) {
+        databaseConnection = undefined;
+        mongoClient = undefined;
+        try {
+          await client.close();
+        } catch (closeError) {
+          console.error("MongoDB client cleanup failed.", closeError);
+        }
+        throw error;
+      }
+    })();
+  }
+  return databaseConnection;
+}
+
+app.use("/api", async (req, res, next) => {
+  if (req.path === "/health") return next();
+  try {
+    await connectToDatabase();
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+class MongoRateLimitStore {
+  constructor(scope) {
+    this.scope = scope;
+    this.localKeys = false;
+  }
+
+  init(options) {
+    this.windowMs = options.windowMs;
+  }
+
+  getKey(key) {
+    const keyHash = crypto.createHash("sha256").update(key).digest("hex");
+    return `${this.scope}:${keyHash}`;
+  }
+
+  async increment(key) {
+    const now = new Date();
+    const resetAt = new Date(now.getTime() + this.windowMs);
+    const _id = this.getKey(key);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const document = await db.collection(RATE_LIMITS_COLLECTION).findOneAndUpdate(
+          { _id },
+          [{
+            $set: {
+              totalHits: {
+                $cond: [
+                  { $gt: ["$resetAt", now] },
+                  { $add: [{ $ifNull: ["$totalHits", 0] }, 1] },
+                  1
+                ]
+              },
+              resetAt: {
+                $cond: [{ $gt: ["$resetAt", now] }, "$resetAt", resetAt]
+              }
+            }
+          }],
+          { upsert: true, returnDocument: "after" }
+        );
+        if (!document) throw new Error("MongoDB did not return the updated rate-limit record.");
+        return { totalHits: document.totalHits, resetTime: document.resetAt };
+      } catch (error) {
+        if (error.code !== 11000 || attempt > 0) throw error;
+      }
+    }
+    throw new Error("MongoDB could not update the rate-limit record.");
+  }
+
+  async decrement(key) {
+    await db.collection(RATE_LIMITS_COLLECTION).updateOne(
+      { _id: this.getKey(key) },
+      [{ $set: { totalHits: { $max: [0, { $subtract: ["$totalHits", 1] }] } } }]
+    );
+  }
+
+  async resetKey(key) {
+    await db.collection(RATE_LIMITS_COLLECTION).deleteOne({ _id: this.getKey(key) });
+  }
+}
+
 const loginLimiter = rateLimit({
+  store: new MongoRateLimitStore("login"),
   windowMs: 15 * 60 * 1000,
   limit: 8,
   standardHeaders: "draft-8",
@@ -75,6 +190,7 @@ const loginLimiter = rateLimit({
   message: { error: "Too many login attempts. Please wait and try again." }
 });
 const publicFormLimiter = rateLimit({
+  store: new MongoRateLimitStore("public-forms"),
   windowMs: 15 * 60 * 1000,
   limit: 5,
   standardHeaders: "draft-8",
@@ -185,16 +301,30 @@ function getSessionToken(req) {
     ?.slice("buildedlabs_admin=".length);
 }
 
-function requireAdmin(req, res, next) {
+function hashSessionToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+async function requireAdmin(req, res, next) {
   const token = getSessionToken(req);
-  const session = token && sessions.get(token);
-  if (!session || session.expiresAt <= Date.now()) {
-    if (token) sessions.delete(token);
+  if (!token) {
     clearSessionCookie(res);
     return res.status(401).json({ error: "Please sign in to continue." });
   }
-  session.expiresAt = Date.now() + SESSION_TTL_MS;
-  return next();
+  try {
+    const result = await db.collection(ADMIN_SESSIONS_COLLECTION).updateOne(
+      { _id: hashSessionToken(token), expiresAt: { $gt: new Date() } },
+      { $set: { expiresAt: new Date(Date.now() + SESSION_TTL_MS) } }
+    );
+    if (!result.matchedCount) {
+      clearSessionCookie(res);
+      return res.status(401).json({ error: "Please sign in to continue." });
+    }
+    setSessionCookie(res, token);
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 }
 
 function parsePasswordHash(encodedHash) {
@@ -257,7 +387,7 @@ function attachmentBuffer(data) {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  limits: { fileSize: MAX_ATTACHMENT_SIZE, files: 1 },
   fileFilter: (req, file, callback) => {
     const extension = path.extname(file.originalname).toLowerCase();
     const supportedTypes = allowedAttachmentTypes.get(extension);
@@ -348,10 +478,10 @@ app.post("/api/admin/login", validateOrigin, loginLimiter, async (req, res, next
     }
 
     const token = crypto.randomBytes(32).toString("base64url");
-    for (const [sessionToken, session] of sessions) {
-      if (session.expiresAt <= Date.now()) sessions.delete(sessionToken);
-    }
-    sessions.set(token, { expiresAt: Date.now() + SESSION_TTL_MS });
+    await db.collection(ADMIN_SESSIONS_COLLECTION).insertOne({
+      _id: hashSessionToken(token),
+      expiresAt: new Date(Date.now() + SESSION_TTL_MS)
+    });
     setSessionCookie(res, token);
     return res.json({ ok: true });
   } catch (error) {
@@ -359,23 +489,37 @@ app.post("/api/admin/login", validateOrigin, loginLimiter, async (req, res, next
   }
 });
 
-app.get("/api/admin/session", (req, res) => {
+app.get("/api/admin/session", async (req, res, next) => {
   const token = getSessionToken(req);
-  const session = token && sessions.get(token);
-  if (!session || session.expiresAt <= Date.now()) {
-    if (token) sessions.delete(token);
+  if (!token) {
     clearSessionCookie(res);
     return res.json({ authenticated: false });
   }
-  session.expiresAt = Date.now() + SESSION_TTL_MS;
-  return res.json({ authenticated: true });
+  try {
+    const result = await db.collection(ADMIN_SESSIONS_COLLECTION).updateOne(
+      { _id: hashSessionToken(token), expiresAt: { $gt: new Date() } },
+      { $set: { expiresAt: new Date(Date.now() + SESSION_TTL_MS) } }
+    );
+    if (!result.matchedCount) {
+      clearSessionCookie(res);
+      return res.json({ authenticated: false });
+    }
+    setSessionCookie(res, token);
+    return res.json({ authenticated: true });
+  } catch (error) {
+    return next(error);
+  }
 });
 
-app.post("/api/admin/logout", validateOrigin, requireAdmin, (req, res) => {
+app.post("/api/admin/logout", validateOrigin, requireAdmin, async (req, res, next) => {
   const token = getSessionToken(req);
-  if (token) sessions.delete(token);
-  clearSessionCookie(res);
-  res.json({ ok: true });
+  try {
+    if (token) await db.collection(ADMIN_SESSIONS_COLLECTION).deleteOne({ _id: hashSessionToken(token) });
+    clearSessionCookie(res);
+    return res.json({ ok: true });
+  } catch (error) {
+    return next(error);
+  }
 });
 
 app.get("/api/admin/applications/export.csv", requireAdmin, async (req, res, next) => {
@@ -595,7 +739,7 @@ app.use((error, req, res, next) => {
   if (res.headersSent) return next(error);
   if (error instanceof multer.MulterError) {
     const message = error.code === "LIMIT_FILE_SIZE"
-      ? "Attachment must be 10 MB or smaller."
+      ? "Attachment must be 4 MB or smaller."
       : "The attachment could not be uploaded.";
     return res.status(400).json({ error: message });
   }
@@ -609,27 +753,23 @@ app.use((error, req, res, next) => {
 async function start() {
   if (!process.env.MONGODB_URI) throw new Error("MONGODB_URI is required.");
   if (!process.env.ADMIN_PASSWORD_HASH) throw new Error("ADMIN_PASSWORD_HASH is required.");
-  mongoClient = new MongoClient(process.env.MONGODB_URI);
-  await mongoClient.connect();
-  db = mongoClient.db(process.env.MONGODB_DB || "buildedlabs");
-  await Promise.all([
-    db.collection("applications").createIndex({ createdAt: -1 }),
-    db.collection("applications").createIndex({ status: 1, createdAt: -1 }),
-    db.collection("messages").createIndex({ createdAt: -1 })
-  ]);
+  await connectToDatabase();
   app.listen(PORT, () => {
     console.log(`Buildedlabs server listening on http://localhost:${PORT}`);
   });
 }
 
-start().catch((error) => {
-  console.error("Buildedlabs server could not start.", error.message);
-  process.exitCode = 1;
-});
-
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, async () => {
-    if (mongoClient) await mongoClient.close();
-    process.exit(0);
+if (require.main === module) {
+  start().catch((error) => {
+    console.error("Buildedlabs server could not start.", error.message);
+    process.exitCode = 1;
   });
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, async () => {
+      if (mongoClient) await mongoClient.close();
+      process.exit(0);
+    });
+  }
 }
+
+module.exports = app;

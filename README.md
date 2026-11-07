@@ -12,6 +12,21 @@ The site runs through an Express server. Project applications and contact messag
 
 Never commit `.env`. It is excluded by `.gitignore`; `.env.example` contains variable names only.
 
+## Deploy to Vercel
+
+1. Import this GitHub repository into Vercel and deploy it as an Express app. Keep the project root as the Root Directory; `vercel.json` includes the HTML, CSS, JavaScript and favicon files used by the Express function.
+2. Add the required environment variables in **Project Settings → Environment Variables**:
+   - `MONGODB_URI`
+   - `ADMIN_USERNAME`
+   - `ADMIN_PASSWORD_HASH`
+3. Add `MONGODB_DB` if you want a database name other than `buildedlabs`. Add the SMTP variables below if the admin panel should send email.
+4. Make sure your MongoDB Atlas network access rules allow connections from your Vercel deployment. Use Vercel static egress when available; avoid opening the database to all IP addresses.
+5. Redeploy after setting or changing environment variables. Once deployed, the public site is at `/` and the owner panel is at `/admin`.
+
+Vercel sets `NODE_ENV=production` for production deployments, which enables the Secure admin cookie. The app connects to MongoDB lazily and reuses a client within each warm function instance. Admin sessions and API rate limits are stored in MongoDB so they work across serverless instances; admin sessions expire after 12 hours. Monitor MongoDB Atlas connection usage as Vercel scales function instances.
+
+Vercel Functions limit request payloads, so application attachments are limited to 4 MB (including multipart request overhead) and remain stored in MongoDB. Larger uploads require direct-to-object-storage uploads.
+
 ## Admin password
 
 `ADMIN_PASSWORD_HASH` uses a salted scrypt hash in this format: `scrypt$<base64-salt>$<base64-hash>`. Generate one without saving the clear-text password:
@@ -46,4 +61,4 @@ The reply button records the reply in the application and sends it to the applic
 
 ## Data and deployment
 
-Applications, contact messages and attached files are stored in the `buildedlabs` MongoDB database by default. Attachments are limited to 10 MB and are only downloadable after admin authentication. Deploy behind HTTPS and set `NODE_ENV=production` so the admin session cookie is Secure. Session tokens are held in server memory and expire after 12 hours; restarting the server signs out the admin.
+Applications, contact messages, admin sessions and attached files are stored in the `buildedlabs` MongoDB database by default. Attachments are only downloadable after admin authentication. Deploy behind HTTPS so the admin session cookie is Secure.

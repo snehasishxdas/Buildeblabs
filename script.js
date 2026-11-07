@@ -10,6 +10,7 @@ const formError = document.querySelector("#form-error");
 const servicesError = document.querySelector("#services-error");
 const draftStatus = document.querySelector("#draft-status");
 const storageKey = "buildedlabs-application-draft";
+const maxAttachmentSize = 4 * 1024 * 1024;
 let currentStep = 1;
 
 document.querySelector("#current-year").textContent = new Date().getFullYear();
@@ -202,8 +203,8 @@ function validateStep(step) {
   }
   if (step === 3) {
     const upload = applicationForm.elements.attachment.files[0];
-    if (upload && upload.size > 10 * 1024 * 1024) {
-      formError.textContent = "That file is over 10 MB. Please choose a smaller file.";
+    if (upload && upload.size > maxAttachmentSize) {
+      formError.textContent = "That file is over 4 MB. Please choose a smaller file.";
       formError.hidden = false;
       applicationForm.elements.attachment.focus();
       return false;
@@ -220,7 +221,7 @@ function stepIsComplete(step) {
   if (step === 2 && !applicationForm.querySelector('input[name="services"]:checked')) return false;
   if (step === 3) {
     const upload = applicationForm.elements.attachment.files[0];
-    if (upload && upload.size > 10 * 1024 * 1024) return false;
+    if (upload && upload.size > maxAttachmentSize) return false;
   }
   return true;
 }
@@ -246,8 +247,8 @@ applicationForm.addEventListener("input", (event) => {
 applicationForm.addEventListener("change", (event) => {
   if (event.target.name === "attachment") {
     const file = event.target.files[0];
-    if (file && file.size > 10 * 1024 * 1024) {
-      formError.textContent = "That file is over 10 MB. Please choose a smaller file.";
+    if (file && file.size > maxAttachmentSize) {
+      formError.textContent = "That file is over 4 MB. Please choose a smaller file.";
       formError.hidden = false;
     } else {
       formError.hidden = true;
