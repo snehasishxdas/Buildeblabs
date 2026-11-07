@@ -14,6 +14,94 @@ let currentStep = 1;
 
 document.querySelector("#current-year").textContent = new Date().getFullYear();
 
+const scrollProgress = document.querySelector(".scroll-progress span");
+let scrollFrame = 0;
+function updateScrollProgress() {
+  if (scrollFrame) return;
+  scrollFrame = window.requestAnimationFrame(() => {
+    const scrollableHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const progress = scrollableHeight > 0 ? window.scrollY / scrollableHeight : 0;
+    scrollProgress.style.width = `${Math.min(100, Math.max(0, progress * 100))}%`;
+    scrollFrame = 0;
+  });
+}
+window.addEventListener("scroll", updateScrollProgress, { passive: true });
+window.addEventListener("resize", updateScrollProgress);
+updateScrollProgress();
+
+if (!reducedMotion && window.matchMedia("(pointer: fine)").matches) {
+  document.body.classList.add("has-pointer-aura");
+  const tiltItems = document.querySelectorAll("[data-tilt], a[href], button");
+  const heroArt = document.querySelector(".hero-art");
+  const heroObject = document.querySelector(".hero-object");
+  let pointerX = window.innerWidth / 2;
+  let pointerY = window.innerHeight / 2;
+
+  function updateHeroParallax() {
+    const bounds = heroArt.getBoundingClientRect();
+    if (bounds.bottom <= 0 || bounds.top >= window.innerHeight) {
+      heroArt.style.removeProperty("--hero-tilt-x");
+      heroArt.style.removeProperty("--hero-tilt-y");
+      heroObject.style.removeProperty("--mouse-x");
+      heroObject.style.removeProperty("--mouse-y");
+      heroObject.style.removeProperty("--mouse-tilt-x");
+      heroObject.style.removeProperty("--mouse-tilt-y");
+      return;
+    }
+
+    const x = Math.max(-1, Math.min(1, (pointerX / window.innerWidth - 0.5) * 2));
+    const y = Math.max(-1, Math.min(1, (pointerY / window.innerHeight - 0.5) * 2));
+    heroArt.style.setProperty("--hero-tilt-x", `${(x * 16).toFixed(2)}deg`);
+    heroArt.style.setProperty("--hero-tilt-y", `${(y * -14).toFixed(2)}deg`);
+    heroObject.style.setProperty("--mouse-x", `${(x * 22).toFixed(2)}px`);
+    heroObject.style.setProperty("--mouse-y", `${(y * 22).toFixed(2)}px`);
+    heroObject.style.setProperty("--mouse-tilt-x", `${(y * -30).toFixed(2)}deg`);
+    heroObject.style.setProperty("--mouse-tilt-y", `${(x * 38).toFixed(2)}deg`);
+  }
+
+  window.addEventListener("pointermove", (event) => {
+    if (event.pointerType === "touch") return;
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+    document.documentElement.style.setProperty("--pointer-x", `${event.clientX}px`);
+    document.documentElement.style.setProperty("--pointer-y", `${event.clientY}px`);
+    updateHeroParallax();
+  }, { passive: true });
+  window.addEventListener("scroll", updateHeroParallax, { passive: true });
+  window.addEventListener("resize", updateHeroParallax);
+  window.addEventListener("blur", () => {
+    heroArt.style.removeProperty("--hero-tilt-x");
+    heroArt.style.removeProperty("--hero-tilt-y");
+    heroObject.style.removeProperty("--mouse-x");
+    heroObject.style.removeProperty("--mouse-y");
+    heroObject.style.removeProperty("--mouse-tilt-x");
+    heroObject.style.removeProperty("--mouse-tilt-y");
+  });
+
+  tiltItems.forEach((item) => {
+    item.addEventListener("pointermove", (event) => {
+      if (event.pointerType === "touch") return;
+      const bounds = item.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      const x = (event.clientX - bounds.left) / bounds.width;
+      const y = (event.clientY - bounds.top) / bounds.height;
+      const strength = Number(item.dataset.tiltStrength) || (item.hasAttribute("data-tilt") ? 13 : 8);
+      item.style.setProperty("--tilt-x", `${((x - 0.5) * strength).toFixed(2)}deg`);
+      item.style.setProperty("--tilt-y", `${((0.5 - y) * strength).toFixed(2)}deg`);
+      item.style.setProperty("--depth-x", `${((x - 0.5) * 14).toFixed(2)}px`);
+      item.style.setProperty("--depth-y", `${((y - 0.5) * 14).toFixed(2)}px`);
+      item.style.setProperty("--pointer-local-x", `${(x * 100).toFixed(1)}%`);
+      item.style.setProperty("--pointer-local-y", `${(y * 100).toFixed(1)}%`);
+      item.classList.add("is-pointer-active");
+    });
+    item.addEventListener("pointerleave", () => {
+      item.classList.remove("is-pointer-active");
+      ["--tilt-x", "--tilt-y", "--depth-x", "--depth-y", "--pointer-local-x", "--pointer-local-y"]
+        .forEach((property) => item.style.removeProperty(property));
+    });
+  });
+}
+
 menuToggle.addEventListener("click", () => {
   const isExpanded = menuToggle.getAttribute("aria-expanded") === "true";
   menuToggle.setAttribute("aria-expanded", String(!isExpanded));
@@ -40,26 +128,6 @@ if ("IntersectionObserver" in window && !reducedMotion) {
   revealItems.forEach((item) => revealObserver.observe(item));
 } else {
   revealItems.forEach((item) => item.classList.add("is-visible"));
-}
-
-const heroArt = document.querySelector(".hero-art");
-const heroObject = document.querySelector(".hero-object");
-if (!reducedMotion && window.matchMedia("(pointer: fine)").matches) {
-  heroArt.addEventListener("pointermove", (event) => {
-    const bounds = heroArt.getBoundingClientRect();
-    const x = (event.clientX - bounds.left) / bounds.width - 0.5;
-    const y = (event.clientY - bounds.top) / bounds.height - 0.5;
-    heroObject.style.setProperty("--mouse-x", `${x * 12}px`);
-    heroObject.style.setProperty("--mouse-y", `${y * 12}px`);
-    heroObject.style.setProperty("--mouse-tilt-x", `${y * -13}deg`);
-    heroObject.style.setProperty("--mouse-tilt-y", `${x * 16}deg`);
-  });
-  heroArt.addEventListener("pointerleave", () => {
-    heroObject.style.removeProperty("--mouse-x");
-    heroObject.style.removeProperty("--mouse-y");
-    heroObject.style.removeProperty("--mouse-tilt-x");
-    heroObject.style.removeProperty("--mouse-tilt-y");
-  });
 }
 
 document.querySelectorAll(".filter-button").forEach((button) => {
