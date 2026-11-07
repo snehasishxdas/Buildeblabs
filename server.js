@@ -566,7 +566,7 @@ app.post("/api/admin/applications/:id/reply", validateOrigin, requireAdmin, asyn
   }
 });
 
-const publicFiles = new Set(["index.html", "styles.css", "script.js", "admin.html", "admin.css", "admin.js"]);
+const publicFiles = new Set(["index.html", "styles.css", "script.js", "admin.html", "admin.css", "admin.js", "favicon.svg"]);
 app.use((req, res, next) => {
   if (!["GET", "HEAD"].includes(req.method)) return next();
   const requestedFile = req.path === "/" ? "index.html" : req.path.slice(1);
